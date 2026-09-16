@@ -1,10 +1,10 @@
 (() => {
-  const alerts = new Map();   // id -> alert
-  const sensors = new Map();  // sensor_id -> sensor
+  const alerts = new Map();
+  const sensors = new Map();
   const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
-  const recentReceipts = [];   // timestamps (ms) of alerts received, for events/sec
-  const recentLatencies = [];  // last N processing_latency_ms values
+  const recentReceipts = [];
+  const recentLatencies = [];
 
   let soundEnabled = false;
   let audioCtx = null;
@@ -32,7 +32,7 @@
       osc.connect(gain).connect(audioCtx.destination);
       osc.start();
       osc.stop(audioCtx.currentTime + 0.4);
-    } catch (e) { /* audio not available; non-fatal */ }
+    } catch (e) {}
   }
 
   soundToggle.addEventListener("click", () => {

@@ -15,10 +15,6 @@ services:
   sensor-sim:
     build: ./sensor-sim
     environment:
-      # A human dashboard can't usefully read >1 alert/sec anyway; this is
-      # tuned so steady-state traffic is easily watchable while the 1%
-      # chance of a 500-event burst still delivers a real, visible stress
-      # test. Raise RATE to stress-test throughput (see README).
       RATE: "25"
       BURST_CHANCE: "0.01"
       BURST_SIZE: "500"
@@ -47,8 +43,6 @@ services:
       DATABASE_PATH: /data/db.sqlite3
       SENSOR_WS_URL: ws://sensor-sim:8765
       DJANGO_DEBUG: "true"
-      # DASHBOARD_BASIC_AUTH_USER: operator
-      # DASHBOARD_BASIC_AUTH_PASS: change-me
     volumes:
       - sqlite-data:/data
     depends_on:

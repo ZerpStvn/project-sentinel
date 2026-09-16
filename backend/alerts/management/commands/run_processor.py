@@ -1,33 +1,3 @@
-"""
-Processor worker.
-
-Reads events from the Redis Stream via a consumer group, normalizes and
-deduplicates them, resolves severity, updates live per-sensor/per-site
-state, persists alerts, and broadcasts to every connected dashboard over
-the Channels layer.
-
-Restart / crash survival (the "zero missed alerts" core):
-- Redis consumer groups track delivery per-consumer. An entry is only
-  removed from the group's Pending Entries List (PEL) when we `XACK` it
-  *after* it has been fully processed (DB write + broadcast). If this
-  process is killed at any point before that ack, the entry simply stays
-  pending.
-- On startup (and periodically while running), `XAUTOCLAIM` reclaims any
-  entry that has been pending longer than PENDING_CLAIM_IDLE_MS from a
-  consumer that never acked it -- including a previous instance of this
-  same worker that crashed. That reclaimed entry is processed exactly
-  like a fresh one.
-- Persisting the resulting Alert is idempotent: `event_id` is unique in
-  the database, so if a crash happens *after* the DB write but *before*
-  the XACK (causing the same entry to be reclaimed and reprocessed), the
-  duplicate is absorbed by `get_or_create` rather than shown twice.
-- A short-lived Redis SETNX dedupe key additionally absorbs the common
-  case cheaply, without a DB round trip.
-
-This gives an explicit at-least-once delivery guarantee end-to-end
-(ingest -> stream -> processor -> DB/dashboard), with the DB unique
-constraint providing effectively-once *visibility* to operators.
-"""
 import asyncio
 import datetime
 import json
@@ -94,26 +64,11 @@ class Command(BaseCommand):
                 await self._process_entries(entries, r, channel_layer, cache)
 
     async def _process_entries(self, entries, r, channel_layer, cache):
-        """
-        Process a whole XREADGROUP/XAUTOCLAIM batch (up to ~100-200 entries)
-        together instead of one event at a time. Batching two things is what
-        makes this fast enough to hold sub-second latency under the
-        generator's bursts:
-
-        - Redis: every SETNX (dedupe) and HSET (last-seen) in the batch goes
-          through one pipeline, i.e. one network round trip for the whole
-          batch instead of one per event. XACK + the processed counter are
-          likewise batched at the end.
-        - SQLite: new alerts are written with one `abulk_create` instead of
-          one `INSERT` (and fsync) per event -- measured ~17ms/commit doing
-          it one row at a time on this Docker volume, which alone capped
-          throughput at ~60 events/sec.
-        """
         if not entries:
             return 0
 
         now = datetime.datetime.now(datetime.timezone.utc)
-        parsed = []  # (stream_id, event_dict_or_None, ingested_ts)
+        parsed = []
         for stream_id, fields in entries:
             payload = fields.get("payload")
             event = None
@@ -124,7 +79,6 @@ class Command(BaseCommand):
                     self.stderr.write(self.style.ERROR(f"[processor] dropping malformed entry {stream_id}: {exc}"))
             parsed.append((stream_id, event, fields.get("ingested_ts")))
 
-        # --- batch 1: sensor liveness (collapse to latest per sensor) + dedupe SETNX ---
         sensor_latest = {}
         for _, event, _ in parsed:
             if event and event.get("sensor_id"):
@@ -148,7 +102,6 @@ class Command(BaseCommand):
             eid: bool(results[dedupe_offset + i]) for i, eid in enumerate(dedupe_ids)
         }
 
-        # --- sensor status transitions: rare, so a per-sensor DB write here is fine ---
         for sid, (site_id, etype) in sensor_latest.items():
             desired = "offline" if etype == "camera_offline" else "online"
             if cache.get(sid) == desired:
@@ -159,14 +112,13 @@ class Command(BaseCommand):
             cache[sid] = desired
             await channel_layer.group_send(DASHBOARD_GROUP, {"type": "sensor.update", "sensor": sensor_to_dict(status_obj)})
 
-        # --- batch 2: build + bulk-insert new alerts ---
         to_create = []
         for _, event, ingested_ts in parsed:
             if not event or event.get("type") == HEARTBEAT_TYPE:
                 continue
             eid = event.get("event_id")
             if not first_time.get(eid, True):
-                continue  # duplicate delivery, already recorded
+                continue
             ingested_dt = parse_iso(ingested_ts)
             latency_ms = (now - ingested_dt).total_seconds() * 1000 if ingested_dt else 0.0
             to_create.append(Alert(
@@ -182,9 +134,6 @@ class Command(BaseCommand):
             ))
 
         if to_create:
-            # ignore_conflicts absorbs the rare case of a redelivery after the
-            # Redis dedupe key already expired -- the unique event_id constraint
-            # is the final backstop against a duplicate row.
             await Alert.objects.abulk_create(to_create, ignore_conflicts=True)
             eids = [a.event_id for a in to_create]
             async for alert in Alert.objects.filter(event_id__in=eids):
@@ -198,8 +147,6 @@ class Command(BaseCommand):
         return len(stream_ids)
 
     async def _sweep_loop(self, r, channel_layer, cache):
-        """Detect sensors that have gone silent (no event AND no heartbeat),
-        which is distinct from an explicit camera_offline event."""
         while True:
             await asyncio.sleep(settings.SWEEP_INTERVAL_SECONDS)
             try:
@@ -251,8 +198,6 @@ class Command(BaseCommand):
         return total
 
     async def _reclaim_loop(self, r, consumer_name, channel_layer, cache):
-        """Periodically reclaim entries left pending by *other* dead consumers
-        while this process is running (multi-worker robustness)."""
         while True:
             await asyncio.sleep(5)
             try:

@@ -3,13 +3,6 @@ from django.db.backends.signals import connection_created
 
 
 def _enable_sqlite_wal(sender, connection, **kwargs):
-    """
-    Default SQLite commits fsync on every write ("journal_mode=delete"),
-    which measured ~17ms/commit on this Docker volume -- an easy throughput
-    ceiling of ~60 writes/sec no matter how the rest of the pipeline is
-    tuned. WAL mode batches fsyncs and is the standard fix for a
-    write-heavy SQLite workload like ours (one write per unique alert).
-    """
     if connection.vendor != "sqlite":
         return
     with connection.cursor() as cursor:

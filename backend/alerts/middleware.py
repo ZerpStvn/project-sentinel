@@ -5,9 +5,6 @@ from django.http import HttpResponse
 
 
 class BasicAuthMiddleware:
-    """Optional HTTP Basic Auth gate for the dashboard, enabled only when
-    both DASHBOARD_BASIC_AUTH_USER and DASHBOARD_BASIC_AUTH_PASS are set."""
-
     def __init__(self, get_response):
         self.get_response = get_response
         self.enabled = bool(settings.DASHBOARD_BASIC_AUTH_USER and settings.DASHBOARD_BASIC_AUTH_PASS)

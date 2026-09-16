@@ -30,8 +30,6 @@ class DashboardConsumer(AsyncJsonWebsocketConsumer):
         elif action == "ping":
             await self.send_json({"type": "pong"})
 
-    # --- group_send handlers (dispatched by "type" with dots -> underscores) ---
-
     async def alert_new(self, event):
         await self.send_json({"type": "alert", "alert": event["alert"]})
 
@@ -43,8 +41,6 @@ class DashboardConsumer(AsyncJsonWebsocketConsumer):
 
     async def metrics_tick(self, event):
         await self.send_json({"type": "metrics", "metrics": event["metrics"]})
-
-    # --- helpers ---
 
     async def _snapshot(self):
         alerts = [

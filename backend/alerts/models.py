@@ -8,9 +8,6 @@ class Alert(models.Model):
         ("resolved", "Resolved"),
     ]
 
-    # Unique on event_id: this is our DB-level idempotency guard. Even if the
-    # at-least-once delivery path (Redis Streams) redelivers an event after a
-    # crash, this constraint means it can only ever be persisted once.
     event_id = models.CharField(max_length=64, unique=True)
     sensor_id = models.CharField(max_length=64, db_index=True)
     site_id = models.CharField(max_length=64, db_index=True)
@@ -41,8 +38,8 @@ class Alert(models.Model):
 class SensorStatus(models.Model):
     STATUS_CHOICES = [
         ("online", "Online"),
-        ("silent", "Silent"),   # no event/heartbeat within the silence window
-        ("offline", "Offline"),  # sensor explicitly reported camera_offline
+        ("silent", "Silent"),
+        ("offline", "Offline"),
     ]
 
     sensor_id = models.CharField(max_length=64, unique=True)

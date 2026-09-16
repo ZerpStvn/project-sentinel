@@ -44,16 +44,6 @@ CHANNEL_LAYERS = {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
             "hosts": [REDIS_URL],
-            # Default capacity (100) is tuned for typical app traffic, not a
-            # firehose of alerts. Each dashboard connection's channel is a
-            # bounded queue; group_send silently drops messages beyond
-            # capacity rather than blocking the sender. Raised here so a
-            # connected dashboard can absorb a real burst (~500 events) of
-            # push messages without losing its own ack/resolve confirmation
-            # or an alert notification. This is a UI-freshness safeguard,
-            # not part of the alert durability guarantee -- the alert data
-            # itself is safe in Redis Streams/DB regardless; a dropped push
-            # just means the dashboard catches up on next snapshot/reconnect.
             "capacity": 3000,
             "expiry": 30,
         },
@@ -63,10 +53,6 @@ CHANNEL_LAYERS = {
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Deployed setups (e.g. Railway) run web/ingest/processor as separate
-    # services with no shared filesystem, so SQLite's single-file model
-    # doesn't work -- use a real Postgres instead (DATABASE_URL is provided
-    # by Railway's Postgres plugin). See DEPLOY.md.
     import dj_database_url
 
     DATABASES = {
@@ -93,25 +79,14 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# --- Sentinel-specific config -------------------------------------------------
-
 SENSOR_WS_URL = os.getenv("SENSOR_WS_URL", "ws://localhost:8765")
 STREAM_KEY = os.getenv("SENTINEL_STREAM_KEY", "sentinel:events")
 STREAM_GROUP = os.getenv("SENTINEL_STREAM_GROUP", "processors")
 STREAM_MAXLEN = int(os.getenv("SENTINEL_STREAM_MAXLEN", "200000"))
 DEDUPE_TTL_SECONDS = int(os.getenv("SENTINEL_DEDUPE_TTL", "300"))
-# With 200 sensors sharing the feed, the mean gap between events for any one
-# sensor is roughly (num_sensors / RATE) seconds -- at the default RATE=25
-# that's ~8s. This threshold must sit well above that mean or ordinary
-# Poisson variance triggers false "silent" alerts constantly. 90s keeps
-# random false positives to roughly ~1/hour across all 200 sensors; for a
-# quick demo of real silence detection, lower this (or just stop
-# sensor-sim) rather than lowering it to something close to the mean gap.
 SENSOR_SILENCE_SECONDS = float(os.getenv("SENTINEL_SILENCE_SECONDS", "90"))
 SWEEP_INTERVAL_SECONDS = float(os.getenv("SENTINEL_SWEEP_INTERVAL", "2"))
 PENDING_CLAIM_IDLE_MS = int(os.getenv("SENTINEL_CLAIM_IDLE_MS", "5000"))
 
-# Optional HTTP basic auth in front of the dashboard (stretch goal). Leave
-# either unset to disable.
 DASHBOARD_BASIC_AUTH_USER = os.getenv("DASHBOARD_BASIC_AUTH_USER", "")
 DASHBOARD_BASIC_AUTH_PASS = os.getenv("DASHBOARD_BASIC_AUTH_PASS", "")

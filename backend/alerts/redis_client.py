@@ -12,7 +12,6 @@ def get_redis() -> aioredis.Redis:
 
 
 async def ensure_group(r: aioredis.Redis):
-    """Create the consumer group (and stream) if they don't exist yet."""
     try:
         await r.xgroup_create(settings.STREAM_KEY, settings.STREAM_GROUP, id="0", mkstream=True)
     except Exception as exc:

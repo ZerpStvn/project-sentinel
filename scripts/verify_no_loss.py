@@ -1,28 +1,4 @@
 #!/usr/bin/env python3
-"""
-Reconciliation script for the "zero missed alerts" guarantee.
-
-Compares:
-  - how many events the ingest worker durably wrote to the Redis stream
-    (sentinel:ingest:count)
-  - how many stream entries the processor has XACKed (sentinel:processor:count)
-  - how many entries are still pending/unacked in the consumer group (XPENDING)
-  - how many alerts (non-heartbeat, deduped) are persisted in the database
-    (via the /api/metrics/ endpoint)
-
-Usage:
-    python scripts/verify_no_loss.py
-    python scripts/verify_no_loss.py --redis-url redis://localhost:6379/0 \
-        --metrics-url http://localhost:8000/api/metrics/
-
-Suggested demo flow (see README "How we verified nothing is lost"):
-  1. Start the stack, let it run under load for ~10s.
-  2. `docker kill -s SIGKILL sentinel-processor-1` mid-stream (ungraceful).
-  3. `docker compose up -d processor` to bring it back.
-  4. Run this script a couple of times a few seconds apart: pending should
-     drop to 0 and ingested_total == processed_total once it catches up,
-     with no gap in persisted alerts.
-"""
 import argparse
 import json
 import sys
@@ -46,7 +22,7 @@ def main():
         pending_info = r.xpending(args.stream_key, args.group)
         pending = pending_info["pending"] if pending_info else 0
     except redis.exceptions.ResponseError:
-        pending = None  # group doesn't exist yet
+        pending = None
 
     ingested = int(r.get("sentinel:ingest:count") or 0)
     processed = int(r.get("sentinel:processor:count") or 0)

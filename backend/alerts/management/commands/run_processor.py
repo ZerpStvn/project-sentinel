@@ -6,6 +6,7 @@ import uuid
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import OperationalError
 
 from alerts.models import Alert, SensorStatus
 from alerts.redis_client import ensure_group, get_redis
@@ -37,13 +38,24 @@ class Command(BaseCommand):
         consumer_name = f"proc-{uuid.uuid4().hex[:8]}"
 
         cache = {}
-        async for s in SensorStatus.objects.all():
-            cache[s.sensor_id] = s.status
+        delay = 1
+        while True:
+            try:
+                cache = {}
+                async for s in SensorStatus.objects.all():
+                    cache[s.sensor_id] = s.status
+                self.stdout.write(self.style.SUCCESS(
+                    f"[processor] {consumer_name} starting; reclaiming any stale pending entries"
+                ))
+                reclaimed = await self._reclaim(r, consumer_name, channel_layer, cache)
+                break
+            except OperationalError as exc:
+                self.stderr.write(self.style.ERROR(
+                    f"[processor] database unavailable at startup ({exc}); retrying in {delay}s"
+                ))
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30)
 
-        self.stdout.write(self.style.SUCCESS(
-            f"[processor] {consumer_name} starting; reclaiming any stale pending entries"
-        ))
-        reclaimed = await self._reclaim(r, consumer_name, channel_layer, cache)
         if reclaimed:
             self.stdout.write(self.style.WARNING(f"[processor] recovered {reclaimed} in-flight event(s) from a prior run"))
 
@@ -61,7 +73,13 @@ class Command(BaseCommand):
             if not resp:
                 continue
             for _stream_name, entries in resp:
-                await self._process_entries(entries, r, channel_layer, cache)
+                try:
+                    await self._process_entries(entries, r, channel_layer, cache)
+                except OperationalError as exc:
+                    self.stderr.write(self.style.ERROR(
+                        f"[processor] database unavailable, entries remain pending for retry: {exc}"
+                    ))
+                    await asyncio.sleep(3)
 
     async def _process_entries(self, entries, r, channel_layer, cache):
         if not entries:

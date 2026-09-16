@@ -3,6 +3,7 @@ import datetime
 import json
 import uuid
 
+from asgiref.sync import sync_to_async
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -61,6 +62,7 @@ class Command(BaseCommand):
 
         asyncio.create_task(self._sweep_loop(r, channel_layer, cache))
         asyncio.create_task(self._reclaim_loop(r, consumer_name, channel_layer, cache))
+        asyncio.create_task(self._retention_loop())
 
         while True:
             resp = await r.xreadgroup(
@@ -222,3 +224,18 @@ class Command(BaseCommand):
                 await self._reclaim(r, consumer_name, channel_layer, cache)
             except Exception as exc:  # noqa: BLE001
                 self.stderr.write(self.style.ERROR(f"[processor] reclaim-loop error: {exc}"))
+
+    async def _retention_loop(self):
+        while True:
+            await asyncio.sleep(settings.RETENTION_SWEEP_SECONDS)
+            try:
+                cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+                    days=settings.ALERT_RETENTION_DAYS
+                )
+                deleted, _ = await sync_to_async(Alert.objects.filter(received_at__lt=cutoff).delete)()
+                if deleted:
+                    self.stdout.write(f"[processor] pruned {deleted} alert(s) older than {settings.ALERT_RETENTION_DAYS}d")
+            except OperationalError as exc:
+                self.stderr.write(self.style.ERROR(f"[processor] retention sweep: database unavailable: {exc}"))
+            except Exception as exc:  # noqa: BLE001
+                self.stderr.write(self.style.ERROR(f"[processor] retention sweep error: {exc}"))

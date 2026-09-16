@@ -10,7 +10,7 @@ from django.core.management.base import BaseCommand
 from django.db import OperationalError
 
 from alerts.models import Alert, SensorStatus
-from alerts.redis_client import ensure_group, get_redis
+from alerts.redis_client import ensure_group, get_redis, is_feed_enabled
 from alerts.serialize import alert_to_dict, sensor_to_dict
 from alerts.severity import HEARTBEAT_TYPE, SENSOR_SILENT_TYPE, resolve_severity
 
@@ -60,8 +60,10 @@ class Command(BaseCommand):
         if reclaimed:
             self.stdout.write(self.style.WARNING(f"[processor] recovered {reclaimed} in-flight event(s) from a prior run"))
 
-        asyncio.create_task(self._sweep_loop(r, channel_layer, cache))
-        asyncio.create_task(self._reclaim_loop(r, consumer_name, channel_layer, cache))
+        feed_state = {"enabled": False}
+        asyncio.create_task(self._watch_feed_state(r, feed_state))
+        asyncio.create_task(self._sweep_loop(r, channel_layer, cache, feed_state))
+        asyncio.create_task(self._reclaim_loop(r, consumer_name, channel_layer, cache, feed_state))
         asyncio.create_task(self._retention_loop())
 
         while True:
@@ -76,16 +78,35 @@ class Command(BaseCommand):
                 continue
             for _stream_name, entries in resp:
                 try:
-                    await self._process_entries(entries, r, channel_layer, cache)
+                    await self._process_entries(entries, r, channel_layer, cache, feed_state)
                 except OperationalError as exc:
                     self.stderr.write(self.style.ERROR(
                         f"[processor] database unavailable, entries remain pending for retry: {exc}"
                     ))
                     await asyncio.sleep(3)
 
-    async def _process_entries(self, entries, r, channel_layer, cache):
+    async def _watch_feed_state(self, r, feed_state):
+        while True:
+            try:
+                feed_state["enabled"] = await is_feed_enabled(r)
+            except Exception as exc:  # noqa: BLE001
+                self.stderr.write(self.style.ERROR(f"[processor] feed-state check failed: {exc}"))
+            await asyncio.sleep(1)
+
+    async def _process_entries(self, entries, r, channel_layer, cache, feed_state=None):
         if not entries:
             return 0
+
+        if feed_state is not None and not feed_state["enabled"]:
+            # Feed is deliberately paused: drain the backlog fast without
+            # touching the DB or broadcasting, rather than let a large
+            # pre-existing backlog keep writing/pushing after "stop".
+            stream_ids = [sid for sid, _fields in entries]
+            ack_pipe = r.pipeline()
+            ack_pipe.xack(settings.STREAM_KEY, settings.STREAM_GROUP, *stream_ids)
+            ack_pipe.incrby("sentinel:processor:count", len(stream_ids))
+            await ack_pipe.execute()
+            return len(stream_ids)
 
         now = datetime.datetime.now(datetime.timezone.utc)
         parsed = []
@@ -166,9 +187,11 @@ class Command(BaseCommand):
         await ack_pipe.execute()
         return len(stream_ids)
 
-    async def _sweep_loop(self, r, channel_layer, cache):
+    async def _sweep_loop(self, r, channel_layer, cache, feed_state):
         while True:
             await asyncio.sleep(settings.SWEEP_INTERVAL_SECONDS)
+            if not feed_state["enabled"]:
+                continue
             try:
                 now = datetime.datetime.now(datetime.timezone.utc)
                 lastseen = await r.hgetall("sentinel:lastseen")
@@ -203,7 +226,7 @@ class Command(BaseCommand):
             except Exception as exc:  # noqa: BLE001
                 self.stderr.write(self.style.ERROR(f"[processor] sweep error: {exc}"))
 
-    async def _reclaim(self, r, consumer_name, channel_layer, cache):
+    async def _reclaim(self, r, consumer_name, channel_layer, cache, feed_state=None):
         total = 0
         cursor = "0-0"
         while True:
@@ -212,16 +235,16 @@ class Command(BaseCommand):
                 min_idle_time=settings.PENDING_CLAIM_IDLE_MS, start_id=cursor, count=200,
             )
             if entries:
-                total += await self._process_entries(entries, r, channel_layer, cache)
+                total += await self._process_entries(entries, r, channel_layer, cache, feed_state)
             if cursor in ("0-0", "0", 0):
                 break
         return total
 
-    async def _reclaim_loop(self, r, consumer_name, channel_layer, cache):
+    async def _reclaim_loop(self, r, consumer_name, channel_layer, cache, feed_state):
         while True:
             await asyncio.sleep(5)
             try:
-                await self._reclaim(r, consumer_name, channel_layer, cache)
+                await self._reclaim(r, consumer_name, channel_layer, cache, feed_state)
             except Exception as exc:  # noqa: BLE001
                 self.stderr.write(self.style.ERROR(f"[processor] reclaim-loop error: {exc}"))
 

@@ -1,0 +1,117 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Sentinel</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #111111;
+    --border: #262626;
+    --text: #e5e5e5;
+    --muted: #737373;
+    --critical: #f87171;
+    --high: #fb923c;
+    --medium: #facc15;
+    --low: #60a5fa;
+    --online: #4ade80;
+    --silent: #facc15;
+    --offline: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+    font-size: 13px;
+  }
+  header {
+    display: flex; align-items: center; gap: 20px;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+  }
+  header h1 { font-size: 13px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--offline); display: inline-block; }
+  .status-dot.connected { background: var(--online); }
+  .spacer { flex: 1; }
+  .metric { color: var(--muted); }
+  .metric b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+  button.btn {
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+    padding: 5px 10px; cursor: pointer; font-size: 12px; font-family: inherit;
+  }
+  button.btn:hover { color: var(--text); border-color: #404040; }
+
+  #critical-banner {
+    display: none; border-bottom: 1px solid var(--critical); color: var(--critical);
+    text-align: center; padding: 8px; font-size: 12px; letter-spacing: 0.02em; cursor: pointer;
+  }
+  #critical-banner:hover { background: #1a0f0f; }
+
+  main { display: grid; grid-template-columns: minmax(0,2fr) minmax(260px,1fr); }
+  section.panel { border-right: 1px solid var(--border); }
+  section.panel:last-child { border-right: none; }
+  section.panel > h2 {
+    font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--border);
+  }
+
+  #alerts-list { max-height: calc(100vh - 76px); overflow-y: auto; }
+  .alert-row {
+    display: grid; grid-template-columns: 70px 1fr auto; gap: 12px; align-items: center;
+    padding: 9px 16px; border-bottom: 1px solid var(--border); border-left: 2px solid transparent;
+  }
+  .alert-row.status-acknowledged { opacity: 0.45; }
+  .sev { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .sev.critical { color: var(--critical); }
+  .sev.high { color: var(--high); }
+  .sev.medium { color: var(--medium); }
+  .sev.low { color: var(--low); }
+  .alert-row.critical { border-left-color: var(--critical); }
+  .alert-row.high { border-left-color: var(--high); }
+  .alert-main .type { color: var(--text); }
+  .alert-main .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .actions button { margin-left: 8px; }
+
+  #sites-grid { max-height: calc(100vh - 76px); overflow-y: auto; padding: 0; }
+  .site-card { padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .site-card .site-id { color: var(--text); margin-bottom: 3px; }
+  .site-card .counts { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .site-card .counts span.online { color: var(--online); }
+  .site-card .counts span.silent { color: var(--silent); }
+  .site-card .counts span.offline { color: var(--offline); }
+  .sensor-chip { display: inline-block; margin: 3px 6px 0 0; font-size: 10px; color: var(--muted); }
+  .sensor-chip.silent { color: var(--silent); }
+  .sensor-chip.offline { color: var(--offline); }
+</style>
+</head>
+<body>
+
+<div id="critical-banner">CRITICAL ALERTS AWAITING ACKNOWLEDGEMENT — CLICK TO JUMP</div>
+
+<header>
+  <h1>PROJECT SENTINEL</h1>
+  <span class="status-dot" id="status-dot"></span>
+  <span class="metric" id="conn-label">connecting</span>
+  <div class="spacer"></div>
+  <span class="metric">events/s <b id="m-rate">0</b></span>
+  <span class="metric">avg latency <b id="m-latency">0</b>ms</span>
+  <span class="metric">active <b id="m-active">0</b></span>
+  <button class="btn" id="sound-toggle">Sound: off</button>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Live Alerts</h2>
+    <div id="alerts-list"></div>
+  </section>
+  <section class="panel">
+    <h2>Sites &amp; Sensors</h2>
+    <div id="sites-grid"></div>
+  </section>
+</main>
+
+<script src="{% static 'dashboard.js' %}"></script>
+</body>
+</html>

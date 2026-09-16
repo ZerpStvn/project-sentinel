@@ -1,0 +1,88 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  sensor-sim:
+    build: ./sensor-sim
+    environment:
+      # A human dashboard can't usefully read >1 alert/sec anyway; this is
+      # tuned so steady-state traffic is easily watchable while the 1%
+      # chance of a 500-event burst still delivers a real, visible stress
+      # test. Raise RATE to stress-test throughput (see README).
+      RATE: "25"
+      BURST_CHANCE: "0.01"
+      BURST_SIZE: "500"
+    ports:
+      - "8765:8765"
+
+  migrate:
+    build: ./backend
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_PATH: /data/db.sqlite3
+    volumes:
+      - sqlite-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  web:
+    build: ./backend
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "sentinel.asgi:application"]
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_PATH: /data/db.sqlite3
+      SENSOR_WS_URL: ws://sensor-sim:8765
+      DJANGO_DEBUG: "true"
+      # DASHBOARD_BASIC_AUTH_USER: operator
+      # DASHBOARD_BASIC_AUTH_PASS: change-me
+    volumes:
+      - sqlite-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  ingest:
+    build: ./backend
+    command: ["python", "manage.py", "run_ingest"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SENSOR_WS_URL: ws://sensor-sim:8765
+    depends_on:
+      redis:
+        condition: service_healthy
+      sensor-sim:
+        condition: service_started
+
+  processor:
+    build: ./backend
+    command: ["python", "manage.py", "run_processor"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_PATH: /data/db.sqlite3
+    volumes:
+      - sqlite-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  redis-data:
+  sqlite-data:

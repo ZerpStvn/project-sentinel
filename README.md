@@ -1,5 +1,7 @@
 # Project Sentinel
 
+**Live demo: [https://project-sentinel-production-e14d.up.railway.app/](https://project-sentinel-production-e14d.up.railway.app/)**
+
 The real-time core of an alarm monitoring service: ingest a high-frequency,
 multi-sensor event stream, prioritize and dedupe it, keep live per-site/
 per-sensor state, and push it to an operator dashboard — without ever

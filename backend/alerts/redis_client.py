@@ -1,6 +1,8 @@
 import redis.asyncio as aioredis
 from django.conf import settings
 
+FEED_KEY = "sentinel:feed:enabled"
+
 _client = None
 
 
@@ -17,3 +19,11 @@ async def ensure_group(r: aioredis.Redis):
     except Exception as exc:
         if "BUSYGROUP" not in str(exc):
             raise
+
+
+async def is_feed_enabled(r: aioredis.Redis) -> bool:
+    return await r.get(FEED_KEY) == "1"
+
+
+async def set_feed_enabled(r: aioredis.Redis, enabled: bool):
+    await r.set(FEED_KEY, "1" if enabled else "0")

@@ -4,6 +4,7 @@ import json
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from .models import Alert, SensorStatus
+from .redis_client import get_redis, is_feed_enabled, set_feed_enabled
 from .serialize import alert_to_dict, sensor_to_dict
 
 DASHBOARD_GROUP = "dashboard"
@@ -27,6 +28,11 @@ class DashboardConsumer(AsyncJsonWebsocketConsumer):
                 await self.channel_layer.group_send(
                     DASHBOARD_GROUP, {"type": "alert.update", "alert": alert_to_dict(alert)}
                 )
+        elif action in ("feed_start", "feed_stop"):
+            r = get_redis()
+            live = action == "feed_start"
+            await set_feed_enabled(r, live)
+            await self.channel_layer.group_send(DASHBOARD_GROUP, {"type": "feed.status", "live": live})
         elif action == "ping":
             await self.send_json({"type": "pong"})
 
@@ -42,15 +48,20 @@ class DashboardConsumer(AsyncJsonWebsocketConsumer):
     async def metrics_tick(self, event):
         await self.send_json({"type": "metrics", "metrics": event["metrics"]})
 
+    async def feed_status(self, event):
+        await self.send_json({"type": "feed_status", "live": event["live"]})
+
     async def _snapshot(self):
         alerts = [
             alert_to_dict(a)
             async for a in Alert.objects.exclude(status="resolved").order_by("-received_at")[:200]
         ]
         sensors = [s async for s in SensorStatus.objects.all()]
+        live = await is_feed_enabled(get_redis())
         return {
             "alerts": alerts,
             "sensors": [sensor_to_dict(s) for s in sensors],
+            "feed_live": live,
         }
 
     async def _update_alert(self, alert_id, action, by):

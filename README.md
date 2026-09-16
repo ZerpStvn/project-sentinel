@@ -17,9 +17,16 @@ WebSocket layer), **Redis Streams** as the durable ingest buffer, and
 docker compose up -d --build
 ```
 
-Then open **http://localhost:8000**. Click "Enable sound" once (browsers
-require a user gesture before audio can play) so critical alerts audibly
-alert you, not just visually.
+Then open **http://localhost:8000**. The feed starts **stopped** by
+default — a modal prompts you to click **Start Live Feed** before any
+events flow. This is a deliberate safety control, not a demo gimmick:
+`sensor-sim` and `ingest` run continuously regardless, but `ingest` only
+writes events into the pipeline while the feed is toggled on (a flag in
+Redis, checked before every write), so nothing accumulates in the
+database while nobody's watching. Any connected dashboard can start/stop
+it for everyone (shared state, not per-browser). Click "Enable sound"
+once too (browsers require a user gesture before audio can play) so
+critical alerts audibly alert you, not just visually.
 
 That's it — `docker compose up` brings up 5 containers: `redis`,
 `sensor-sim` (the reference generator from the assessment appendix,

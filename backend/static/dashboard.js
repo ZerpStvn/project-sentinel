@@ -12,6 +12,7 @@
   let ws = null;
   let backoff = 500;
   let renderScheduled = false;
+  let feedLive = false;
 
   const el = (id) => document.getElementById(id);
   const statusDot = el("status-dot");
@@ -20,6 +21,9 @@
   const sitesGrid = el("sites-grid");
   const criticalBanner = el("critical-banner");
   const soundToggle = el("sound-toggle");
+  const feedModal = el("feed-modal");
+  const feedToggle = el("feed-toggle");
+  const feedStartModal = el("feed-start-modal");
 
   function beep() {
     if (!soundEnabled) return;
@@ -42,6 +46,15 @@
     if (soundEnabled && !audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     soundToggle.textContent = soundEnabled ? "Sound: on" : "Sound: off";
   });
+
+  function sendFeedAction(live) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: live ? "feed_start" : "feed_stop" }));
+    }
+  }
+
+  feedToggle.addEventListener("click", () => sendFeedAction(!feedLive));
+  feedStartModal.addEventListener("click", () => sendFeedAction(true));
 
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -69,11 +82,22 @@
     }
   }
 
+  function setFeedLive(live) {
+    feedLive = live;
+    feedModal.classList.toggle("open", !live);
+    feedToggle.textContent = live ? "Feed: live" : "Feed: stopped";
+    feedToggle.classList.toggle("feed-live", live);
+    feedToggle.classList.toggle("feed-stopped", !live);
+  }
+
   function handleMessage(msg) {
     if (msg.type === "snapshot") {
       msg.alerts.forEach(addAlert);
       msg.sensors.forEach((s) => sensors.set(s.sensor_id, s));
+      setFeedLive(!!msg.feed_live);
       scheduleRender();
+    } else if (msg.type === "feed_status") {
+      setFeedLive(!!msg.live);
     } else if (msg.type === "alert") {
       addAlert(msg.alert);
       recentReceipts.push(Date.now());

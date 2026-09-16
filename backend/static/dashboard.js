@@ -2,6 +2,7 @@
   const alerts = new Map();
   const sensors = new Map();
   const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+  const MAX_ALERTS = 300;
 
   const recentReceipts = [];
   const recentLatencies = [];
@@ -10,6 +11,7 @@
   let audioCtx = null;
   let ws = null;
   let backoff = 500;
+  let renderScheduled = false;
 
   const el = (id) => document.getElementById(id);
   const statusDot = el("status-dot");
@@ -60,30 +62,51 @@
     ws.onmessage = (evt) => handleMessage(JSON.parse(evt.data));
   }
 
+  function addAlert(a) {
+    alerts.set(a.id, a);
+    if (alerts.size > MAX_ALERTS) {
+      alerts.delete(alerts.keys().next().value);
+    }
+  }
+
   function handleMessage(msg) {
     if (msg.type === "snapshot") {
-      msg.alerts.forEach((a) => alerts.set(a.id, a));
+      msg.alerts.forEach(addAlert);
       msg.sensors.forEach((s) => sensors.set(s.sensor_id, s));
-      render();
+      scheduleRender();
     } else if (msg.type === "alert") {
-      alerts.set(msg.alert.id, msg.alert);
+      addAlert(msg.alert);
       recentReceipts.push(Date.now());
       if (typeof msg.alert.processing_latency_ms === "number") {
         recentLatencies.push(msg.alert.processing_latency_ms);
         if (recentLatencies.length > 200) recentLatencies.shift();
       }
       if (msg.alert.severity === "critical") beep();
-      render();
+      scheduleRender();
     } else if (msg.type === "alert_update") {
       alerts.set(msg.alert.id, msg.alert);
-      render();
+      scheduleRender();
     } else if (msg.type === "sensor") {
       sensors.set(msg.sensor.sensor_id, msg.sensor);
-      renderSites();
+      scheduleRender();
     }
   }
 
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+      renderScheduled = false;
+      render();
+    });
+  }
+
   function sendAction(action, id) {
+    const existing = alerts.get(id);
+    if (existing) {
+      alerts.set(id, { ...existing, status: action === "ack" ? "acknowledged" : "resolved" });
+      scheduleRender();
+    }
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action, id }));
     }

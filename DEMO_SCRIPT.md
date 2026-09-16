@@ -14,17 +14,24 @@ Wait ~10s, then open http://localhost:8000 in the browser and arrange
 your recording so both the browser and a terminal are visible (split
 screen or two tabs you can switch between).
 
+The feed starts **stopped** by default (a safety control so it never
+silently fills the database unattended) — you'll see a modal prompting
+you to click **Start Live Feed** as soon as the page loads. That's
+expected; starting it is part of the demo, not something to cut around.
+
 ---
 
 ## 0:00–0:25 — Intro
 
-*(Browser: dashboard open, alerts already flowing in)*
+*(Browser: dashboard open, "Live feed is stopped" modal showing)*
 
 > "This is Project Sentinel — the real-time core of an alarm monitoring
 > service. It ingests a high-frequency stream of sensor events, prioritizes
 > them by severity, and pushes them to this live dashboard — built so a
-> traffic burst or a crashed process never loses an alert. Let me show you
-> it running under load first, then prove the zero-missed-alerts part."
+> traffic burst or a crashed process never loses an alert. The feed's off
+> by default so it never runs up the database unattended — let's start it."
+
+*(Click "Start Live Feed" — modal closes, alerts begin streaming in)*
 
 ## 0:25–1:15 — Sustained load, live dashboard
 
